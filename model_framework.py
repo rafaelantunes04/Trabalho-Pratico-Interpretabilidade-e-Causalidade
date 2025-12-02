@@ -221,7 +221,8 @@ def criar_datasets() -> tuple[tf.data.Dataset, tf.data.Dataset]:
         seed=42,
         image_size=TAMANHO_IMG,
         batch_size=TAMANHO_BATCH,
-        label_mode="binary"
+        label_mode="binary",
+        color_mode='rgb'
     )
 
     val_ds = tf.keras.utils.image_dataset_from_directory(
@@ -231,7 +232,8 @@ def criar_datasets() -> tuple[tf.data.Dataset, tf.data.Dataset]:
         seed=42,
         image_size=TAMANHO_IMG,
         batch_size=TAMANHO_BATCH,
-        label_mode="binary"
+        label_mode="binary",
+        color_mode='rgb'
     )
 
     train_ds = train_ds.shuffle(len(train_ds)).prefetch(tf.data.AUTOTUNE)
@@ -323,24 +325,53 @@ def plot_combined_history(history_antes, history_depois):
     # Máximo treino
     max_train_acc = max(acc)
     max_train_epoch = acc.index(max_train_acc)
-    axs[1].scatter(max_train_epoch, max_train_acc, color='blue', zorder=5)
-    axs[1].text(max_train_epoch, max_train_acc + 0.01, 
-                f"{max_train_acc:.4f}", color='blue', fontsize=10, ha='center')
     
     # Máximo validação
     max_val_acc = max(val_acc)
     max_val_epoch = val_acc.index(max_val_acc)
-    axs[1].scatter(max_val_epoch, max_val_acc, color='red', zorder=5)
-    axs[1].text(max_val_epoch, max_val_acc + 0.01, 
-                f"{max_val_acc:.4f}", color='red', fontsize=10, ha='center')
+    
+    # Criar marcadores diferentes para cada ponto
+    axs[1].scatter(max_train_epoch, max_train_acc, color='blue', s=150, 
+                  marker='o', edgecolors='black', linewidth=2, zorder=5, 
+                  label=f'Melhor Treino: {max_train_acc:.4f}')
+    
+    axs[1].scatter(max_val_epoch, max_val_acc, color='red', s=150, 
+                  marker='s', edgecolors='black', linewidth=2, zorder=5, 
+                  label=f'Melhor Validação: {max_val_acc:.4f}')
+    
+    # Adicionar texto com offset para evitar sobreposição
+    offset_train = 0.02 if abs(max_train_epoch - max_val_epoch) < 5 else 0.01
+    offset_val = -0.02 if abs(max_train_epoch - max_val_epoch) < 5 else 0.01
+    
+    axs[1].annotate(f'{max_train_acc:.4f}', 
+                   xy=(max_train_epoch, max_train_acc),
+                   xytext=(max_train_epoch + 0.5, max_train_acc + offset_train),
+                   color='blue', fontsize=10, fontweight='bold',
+                   arrowprops=dict(arrowstyle='->', color='blue', alpha=0.7))
+    
+    axs[1].annotate(f'{max_val_acc:.4f}', 
+                   xy=(max_val_epoch, max_val_acc),
+                   xytext=(max_val_epoch - 0.5, max_val_acc + offset_val),
+                   color='red', fontsize=10, fontweight='bold',
+                   arrowprops=dict(arrowstyle='->', color='red', alpha=0.7))
     
     axs[1].set_xlabel('Épocas')
     axs[1].set_ylabel('Accuracy')
     axs[1].set_title('Precisão do Modelo')
-    axs[1].legend()
+    
+    # Melhorar a legenda
+    handles, labels = axs[1].get_legend_handles_labels()
+    # Remover labels duplicadas mantendo a ordem
+    unique_labels = []
+    unique_handles = []
+    for handle, label in zip(handles, labels):
+        if label not in unique_labels:
+            unique_labels.append(label)
+            unique_handles.append(handle)
+    axs[1].legend(unique_handles, unique_labels, loc='best')
     
     plt.tight_layout()
-    plt.savefig("grafico_modelo.png")
+    plt.savefig("grafico_modelo.png", dpi=300, bbox_inches='tight')
     plt.show()
     
     # Imprimir máximos
