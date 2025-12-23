@@ -1,6 +1,8 @@
-cats_vs_dogs/
-cats_vs_dogs_png/
+assets/cats_vs_dogs/
+assets/cats_vs_dogs_png/
 __pycache__/
 
-cats_vs_dogs.zip
+assets/cats_vs_dogs.zip
+
+
 .ipynb_checkpoints

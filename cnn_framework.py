@@ -8,7 +8,7 @@ from time import sleep
 import requests
 from tqdm import tqdm
 
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 #Pre-processamento
 from tensorflow.keras.applications.efficientnet import preprocess_input
@@ -55,19 +55,21 @@ class Modelo_CNN:
         * Cria modelo e treina-o
         * Guarda o modelo e o gráfico do seu treino. 
         """
+        
+        #Criar Datasets
+        print("A criar datasets")
+        self.train_ds, self.val_ds, self.test_ds = self._setup_datasets()
+        print("Datasets Criados")
+
         # Caso Exista Modelo Ja Treinado
-        if os.path.exists("./modelo.keras"):
+        if os.path.exists("./assets/modelo_cnn.keras"):
             print("Modelo encontrado!")
 
             #Carregar Modelo
             self.modelo = keras.models.load_model(
-                "modelo.keras",
+                "./assets/modelo_cnn.keras",
                 custom_objects={"preprocess_input": preprocess_input}
             )
-
-            #Carregar Datasets
-            self.train_ds, self.val_ds, self.test_ds = self._setup_datasets()
-
 
 
         # Caso Seja Preciso Treinar Modelo
@@ -83,11 +85,6 @@ class Modelo_CNN:
 
             self._convert_to_png()
     
-            #Criar Datasets
-            print("A criar datasets")
-            self.train_ds, self.val_ds, self.test_ds = self._setup_datasets()
-            print("Datasets Criados")
-
             print("A criar modelo")
             self.modelo = self._setup_model()
             
@@ -99,12 +96,12 @@ class Modelo_CNN:
 
     def display_model_info(self):
         """
-        Função que da plot do gráfico de treino do modelo.
+        Função que mostra a estrutura do modelo e da plot do gráfico de treino.
         """
         self.modelo.summary()
 
         plt.figure(figsize=(12, 8))
-        img = mpimg.imread("grafico_modelo.png")
+        img = mpimg.imread("./assets/grafico_modelo_cnn.png")
         plt.imshow(img)
         plt.axis("off")
         plt.show()
@@ -159,11 +156,14 @@ class Modelo_CNN:
         plt.show()
 
 
-    def model_accuracy(self):
+    def model_accuracy(self, test_dataset = None):
         """
         Testa a eficácia do modelo e devolve a sua precisão perantes os dados de teste
         """
-        _, test_accuracy = self.modelo.evaluate(self.test_ds)
+        if test_dataset == None:
+            test_dataset = self.test_ds
+            
+        _, test_accuracy = self.modelo.evaluate(test_dataset, verbose=0)
         return test_accuracy
 
 
@@ -175,7 +175,7 @@ class Modelo_CNN:
         Função que confirma se o dataset ja existe, pedindo para fazer download caso não exista.
         """
         # Confirma se o dataset ja está presente
-        if not os.path.exists("./cats_vs_dogs.zip"):
+        if not os.path.exists("./assets/cats_vs_dogs.zip"):
             
             #Confirmação do utilizador
             r = input("Não tens o dataset dos cães/gatos, queres fazer download dele? (Y/N)\n>")
@@ -193,7 +193,7 @@ class Modelo_CNN:
             block_size = 1024
     
             # Barra de progresso
-            with open("cats_vs_dogs.zip", "wb") as f, tqdm(
+            with open("./assets/cats_vs_dogs.zip", "wb") as f, tqdm(
                 total=total_size, unit='B', unit_scale=True, desc="Downloading"
             ) as bar:
                 for data in response.iter_content(block_size):
@@ -210,10 +210,10 @@ class Modelo_CNN:
         Extraí a pasta que foi downloaded.
         """
         
-        if not os.path.exists("./cats_vs_dogs/"):
+        if not os.path.exists("./assets/cats_vs_dogs/"):
             print("A extraír Zip")
-            with zipfile.ZipFile("./cats_vs_dogs.zip", "r") as zip_ref:
-                zip_ref.extractall("./cats_vs_dogs/")
+            with zipfile.ZipFile("./assets/cats_vs_dogs.zip", "r") as zip_ref:
+                zip_ref.extractall("./assets/cats_vs_dogs/")
     
             print("Zip Extraído")
 
@@ -224,11 +224,11 @@ class Modelo_CNN:
         """
 
         # Converter de jpg para png
-        if not os.path.exists("./cats_vs_dogs_png/"):
+        if not os.path.exists("./assets/cats_vs_dogs_png/"):
             print("A converter imagens para PNG")
-            for root, _, files in os.walk("./cats_vs_dogs/"):
-                rel_path = os.path.relpath(root, "./cats_vs_dogs/")
-                out_folder = os.path.join("./cats_vs_dogs_png/", rel_path)
+            for root, _, files in os.walk("./assets/cats_vs_dogs/"):
+                rel_path = os.path.relpath(root, "./assets/cats_vs_dogs/")
+                out_folder = os.path.join("./assets/cats_vs_dogs_png/", rel_path)
                 os.makedirs(out_folder, exist_ok=True)
     
                 for file in files:
@@ -255,7 +255,7 @@ class Modelo_CNN:
         
         # Train Dataset (80%)
         train_ds = image_dataset_from_directory(
-            "./cats_vs_dogs_png/cats_vs_dogs/",
+            "./assets/cats_vs_dogs_png/cats_vs_dogs/",
             validation_split=0.2,
             subset="training",
             seed=42,
@@ -267,7 +267,7 @@ class Modelo_CNN:
     
         # Temp Dataset (20%)
         temp_ds = image_dataset_from_directory(
-            "./cats_vs_dogs_png/cats_vs_dogs/",
+            "./assets/cats_vs_dogs_png/cats_vs_dogs/",
             validation_split=0.2,
             subset="validation",
             seed=42,
@@ -348,6 +348,9 @@ class Modelo_CNN:
 
     
     def _train_model(self) -> Sequential:
+        """
+        Esta função treina o modelo com vários hiper-parâmetros.
+        """
         # Enhanced callbacks
         early_stop = EarlyStopping(
             monitor="val_loss",
@@ -433,7 +436,7 @@ class Modelo_CNN:
         )
         
         # Save final model
-        self.modelo.save("modelo.keras")
+        self.modelo.save("./assets/modelo_cnn.keras")
         self._plot_train_graph(history1, history2, history3)
         
         return self.modelo
@@ -533,7 +536,7 @@ class Modelo_CNN:
         axs[1].legend(unique_handles, unique_labels, loc='best')
         
         plt.tight_layout()
-        plt.savefig("grafico_modelo.png", dpi=300, bbox_inches='tight')
+        plt.savefig("./assets/grafico_modelo_cnn.png", dpi=300, bbox_inches='tight')
         plt.show()
         
         # Imprimir máximos de cada estágio
