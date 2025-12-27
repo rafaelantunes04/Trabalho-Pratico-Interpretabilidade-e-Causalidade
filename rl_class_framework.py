@@ -13,6 +13,7 @@ import keras
 class Modelo_RL_Classifier:
     def __init__(self):
         self.modelo: Sequential = None
+        self.dataset: pd.DataFrame = None
         self.train_ds: pd.DataFrame = None
         self.val_ds: pd.DataFrame = None
         self.test_ds: pd.DataFrame = None
@@ -58,7 +59,7 @@ class Modelo_RL_Classifier:
         """
         Mostra as Classes e a sua respectiva etiqueta. 
         """
-        print("B (Benign) = 1 | M (Malign) = 0")
+        print("Spam = 1 | Não Spam = 0")
 
         
     def model_accuracy(self, test_dataset = None):
@@ -68,8 +69,8 @@ class Modelo_RL_Classifier:
         if test_dataset == None:
             test_dataset = self.test_ds
 
-        X_test = test_dataset.drop("diagnosis", axis=1).values
-        y_test = test_dataset["diagnosis"].values
+        X_test = test_dataset.drop("spam", axis=1).values
+        y_test = test_dataset["spam"].values
         
         _, test_accuracy = self.modelo.evaluate(X_test, y_test, verbose=0)
         return test_accuracy
@@ -82,15 +83,12 @@ class Modelo_RL_Classifier:
         Carrega e faz o pre-processamento do dataset do cancro da mama.
         """
         #Carregamento
-        df = pd.read_csv("./assets/breast_cancer.csv")
-        df = df.drop("id", axis=1)
-
-        df["diagnosis"] = df["diagnosis"].map({"M": 0, "B": 1})
+        self.dataset = pd.read_csv("./assets/spambase.csv")
         
-        # Train Dataset (75%)
+        # Train Dataset (875%)
         train_df, temp_df = train_test_split(
-            df,
-            stratify=df["diagnosis"],
+            self.dataset,
+            stratify=self.dataset["spam"],
             test_size=0.25,
             random_state=42
         )
@@ -98,15 +96,15 @@ class Modelo_RL_Classifier:
         # Validation & Test Dataset (25%)
         val_df, test_df = train_test_split(
             temp_df,
-            stratify=temp_df["diagnosis"],
+            stratify=temp_df["spam"],
             test_size=0.5,
             random_state=42
         )
 
         #Tirar a Col. de Target
-        X_train = train_df.drop("diagnosis", axis=1)
-        X_val = val_df.drop("diagnosis", axis=1)
-        X_test = test_df.drop("diagnosis", axis=1)
+        X_train = train_df.drop("spam", axis=1)
+        X_val = val_df.drop("spam", axis=1)
+        X_test = test_df.drop("spam", axis=1)
         
         self.scaler.fit(X_train)
         
@@ -114,19 +112,19 @@ class Modelo_RL_Classifier:
         #Train DS
         self.train_ds = pd.concat([
             pd.DataFrame(self.scaler.transform(X_train), columns=X_train.columns),
-            train_df["diagnosis"].reset_index(drop=True)
+            train_df["spam"].reset_index(drop=True)
         ], axis=1)
 
         #Val DS
         self.val_ds = pd.concat([
             pd.DataFrame(self.scaler.transform(X_val), columns=X_val.columns),
-            val_df["diagnosis"].reset_index(drop=True)
+            val_df["spam"].reset_index(drop=True)
         ], axis=1)
 
         #Test DS
         self.test_ds = pd.concat([
             pd.DataFrame(self.scaler.transform(X_test), columns=X_test.columns),
-            test_df["diagnosis"].reset_index(drop=True)
+            test_df["spam"].reset_index(drop=True)
         ], axis=1)
 
         print(f"Train: {len(self.train_ds)} samples")
@@ -138,21 +136,24 @@ class Modelo_RL_Classifier:
         """
         Esta função cria um modelo simples de um classificador com regressão logistica.
         """
-        return Sequential([
-            layers.Input(shape=(self.train_ds.drop(columns=["diagnosis"]).shape[1],)),
-            layers.Dense(1),
-            layers.Activation('sigmoid')
-        ])
+        model = Sequential()
+        model.add(layers.Input(shape=(self.train_ds.drop(columns=["spam"]).shape[1],)))
 
+        model.dense = layers.Dense(1)
+        model.add(model.dense)
+        model.add(layers.Activation('sigmoid'))
+
+        return model
+        
 
     def _train_model(self):
         """
-        Esta função treina o modelo a partir de hiperparâmetros.
+        Esta função treina o modelo.
         """
-        X_train = self.train_ds.drop("diagnosis", axis=1).values
-        y_train = self.train_ds["diagnosis"].values
-        X_val = self.val_ds.drop("diagnosis", axis=1).values
-        y_val = self.val_ds["diagnosis"].values
+        X_train = self.train_ds.drop("spam", axis=1).values
+        y_train = self.train_ds["spam"].values
+        X_val = self.val_ds.drop("spam", axis=1).values
+        y_val = self.val_ds["spam"].values
 
         self.modelo.compile(
             optimizer='adam',
