@@ -8,6 +8,8 @@ from sklearn.metrics import accuracy_score
 import numpy as np
 import pandas as pd
 import shap
+import matplotlib.pyplot as plt
+from scipy.stats import pearsonr
 
 class Modelo_XGB_Classifier:
     def __init__(self):
@@ -233,3 +235,75 @@ class Modelo_XGB_Classifier:
         # Salvar o modelo
         with open("./assets/modelo_xgbclass.pkl", "wb") as f:
             pickle.dump(self.modelo, f)
+
+
+    def run_sensitivity_n(self):
+        """
+        Versão fiel ao paper: 
+        - Remove as n features mais importantes por instância.
+        - Calcula a correlação de Pearson entre Sum(SHAP) e Delta(Output).
+        - Gráfico focado apenas na queda de performance (Accuracy).
+        """
+
+        print("Executando Sensitivity-n...")
+        
+        X_test = self.test_ds.drop("good-quality", axis=1)
+        y_test = self.test_ds["good-quality"]
+        X_values = X_test.values
+        X_means = X_values.mean(axis=0)
+        
+        # Obter SHAP values (Foco na classe 1)
+        shap_res = self.explainer(X_test)
+        shap_values = shap_res.values
+        if len(shap_values.shape) == 3:
+            shap_values = shap_values[:, :, 1]
+
+        # Ordenar features por importância local (cada linha)
+        shap_abs = np.abs(shap_values)
+        sorted_indices = np.argsort(-shap_abs, axis=1)
+
+        # Baseline
+        orig_preds_prob = self.modelo.predict_proba(X_test)[:, 1]
+        
+        scores = [accuracy_score(y_test, self.modelo.predict(X_test))]
+        n_range = range(1, X_test.shape[1] + 1)
+        
+        all_correlations = []
+
+        for n in n_range:
+            X_masked = X_values.copy()
+            
+            # Mascarar as top-n features de cada instância
+            for i in range(len(X_values)):
+                idx_to_hide = sorted_indices[i, :n]
+                X_masked[i, idx_to_hide] = X_means[idx_to_hide]
+            
+            # Novas predições
+            X_masked_df = pd.DataFrame(X_masked, columns=X_test.columns)
+            new_preds_prob = self.modelo.predict_proba(X_masked_df)[:, 1]
+            new_preds_label = self.modelo.predict(X_masked_df)
+            
+            # Accuracy para o gráfico
+            scores.append(accuracy_score(y_test, new_preds_label))
+            
+            # Lógica do Paper: Correlacionar Sum(SHAP_n) com [f(x) - f(x-n)]
+            sum_shap_n = np.sum(shap_values[np.arange(len(shap_values))[:,None], sorted_indices[:, :n]], axis=1)
+            delta_output = orig_preds_prob - new_preds_prob
+            
+            corr, _ = pearsonr(sum_shap_n, delta_output)
+            all_correlations.append(corr)
+
+        # Cálculo do número final solicitado (Média da correlação ao longo de n)
+        final_correlation_score = np.nanmean(all_correlations)
+        print(f"\n>>> SENSIBILIDADE-N (Pearson r): {final_correlation_score:.4f} <<<")
+
+        # Gráfico apenas com a queda de precisão
+        plt.figure(figsize=(9, 5))
+        plt.plot(range(0, X_test.shape[1] + 1), scores, marker='s', color='darkred', linestyle='-', linewidth=2)
+        plt.title(f'Queda da Precisão (Sensitivity-n)\nCorrelação Média: {final_correlation_score:.4f}')
+        plt.xlabel('Número de Features Removidas (Top-N Locais)')
+        plt.ylabel('Accuracy')
+        plt.grid(True, alpha=0.3)
+        plt.show()
+
+        return final_correlation_score
