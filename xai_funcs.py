@@ -1,18 +1,23 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2
 from scipy.stats import pearsonr
 from tqdm import tqdm
 from tf_explain.core.integrated_gradients import IntegratedGradients
 from tf_explain.core.smoothgrad import SmoothGrad
 from tf_explain.core.gradients_inputs import GradientsInputs
 import tensorflow as tf
+from tf_explain.core.vanilla_gradients import VanillaGradients
+from tf_explain.core.grad_cam import GradCAM
 
 
 # Configuração Global dos Explainers
 EXPLAINERS = {
     'integrated_gradients': IntegratedGradients(),
     'grad_input': GradientsInputs(),
-    'smoothgrad': SmoothGrad()
+    'smoothgrad': SmoothGrad(),
+    'gradcam': GradCAM(),
+    'saliency': VanillaGradients()
 }
 
 def criar_subset_estratificado(X, y, samples_per_class=100, seed=42):
@@ -114,51 +119,112 @@ def analise_iterativa_pixels(model, image, label, method_name, top_k=10):
         plt.show()
 
 
-def display_explanation(model, image, label, method_name, threshold=0.2, alpha=0.6):    
+def display_explanation(
+    model,
+    image,
+    label,
+    method_name,
+    threshold=0.2,
+    alpha=0.7,
+    layer_name=None
+):
     """
-    Exibe a imagem original sobreposta pelo mapa de calor da explicação.
+    Exibe a imagem original com o mapa de explicação sobreposto,
+    com pós-processamento consistente para MNIST e imagens RGB.
     """
-    # Preparação
-    img_batch = image[np.newaxis, ...] if image.ndim == 3 else image[np.newaxis, ..., np.newaxis]
-    
+
+    # -----------------------------
+    # Preparação do input
+    # -----------------------------
+    if image.ndim == 2:
+        img_batch = image[np.newaxis, ..., np.newaxis]
+    elif image.ndim == 3:
+        img_batch = image[np.newaxis, ...]
+
     kwargs = {}
-    if method_name == 'integrated_gradients':
-        kwargs['n_steps'] = 100
-    if method_name == 'smoothgrad':
-        kwargs['num_samples'] = 100
-        kwargs['noise'] = 0.15
-    
-    # Explicação
+    if method_name == "integrated_gradients":
+        kwargs["n_steps"] = 100
+    if method_name == "smoothgrad":
+        kwargs["num_samples"] = 100
+        kwargs["noise"] = 0.15
+    if method_name == "gradcam" and layer_name:
+        kwargs["layer_name"] = layer_name
+
     explainer = EXPLAINERS.get(method_name)
+    if explainer is None:
+        raise ValueError(f"Método desconhecido: {method_name}")
+
+    # -----------------------------
+    # Geração da explicação
+    # -----------------------------
     explanation = explainer.explain(
-        validation_data=(img_batch, None), 
-        model=model, class_index=int(label),
+        validation_data=(img_batch, None),
+        model=model,
+        class_index=int(label),
         **kwargs
     )
     explanation = np.squeeze(explanation)
 
-    # Pós-processamento (Limpeza de Fundo)
-    if method_name in ['integrated_gradients', 'smoothgrad']:
-         explanation = explanation * np.squeeze(image)
-
+    # -----------------------------
+    # Pós-processamento correto
+    # -----------------------------
+    # Magnitude
     explanation = np.abs(explanation)
 
-    # Normalização robusta (percentil 99 para evitar outliers extremos)
-    v_min, v_max = explanation.min(), np.percentile(explanation, 99)
-    explanation_norm = np.clip((explanation - v_min) / (v_max - v_min + 1e-8), 0, 1)
+    # Redução de canais se RGB
+    if explanation.ndim == 3:
+        explanation = explanation.mean(axis=-1)
 
-    # Máscara: pixels irrelevantes (< threshold) ficam transparentes (NaN)
-    mask = np.where(explanation_norm >= threshold, explanation_norm, np.nan)
+    # -----------------------------
+    # Normalização robusta
+    # -----------------------------
+    p_low, p_high = np.percentile(explanation, [1, 99])
+    explanation_norm = np.clip(
+        (explanation - p_low) / (p_high - p_low + 1e-8),
+        0.0,
+        1.0
+    )
 
-    # Visualização
-    plt.figure(figsize=(6, 6))
-    plt.imshow(np.squeeze(image), cmap='gray')
-    im = plt.imshow(mask, cmap='cool', alpha=alpha) 
+    # Transparência contínua (sem NaN)
+    alpha_map = explanation_norm.copy()
+    alpha_map[alpha_map < threshold] = 0.0
+
+    if method_name == "saliency":
+        explanation_norm = cv2.GaussianBlur(explanation_norm, (5, 5), 0)
+
+        # Re-normalizar após o blur
+        explanation_norm = (explanation_norm - explanation_norm.min()) / (explanation_norm.max() - explanation_norm.min() + 1e-8)
     
-    plt.colorbar(im, fraction=0.046, pad=0.04)
-    plt.title(f"Método: {method_name} (Filtrado)\nClasse: {label}")
-    plt.axis('off')
+    # -----------------------------
+    # Preparação da imagem base
+    # -----------------------------
+    img_vis = image.copy()
+
+    if img_vis.max() > 1.0:
+        img_vis = img_vis / 255.0
+
+    # -----------------------------
+    # Visualização
+    # -----------------------------
+    plt.figure(figsize=(6, 6))
+
+    if img_vis.ndim == 2:
+        plt.imshow(img_vis, cmap="gray")
+    else:
+        plt.imshow(img_vis)
+
+    plt.imshow(
+        explanation_norm,
+        cmap="cool",
+        alpha=alpha_map * alpha
+    )
+
+    plt.colorbar(fraction=0.046, pad=0.04)
+    plt.title(f"Método: {method_name} | Classe: {label}")
+    plt.axis("off")
+    plt.tight_layout()
     plt.show()
+
 
 
 def analisar_sensitivity_n(

@@ -3,6 +3,7 @@
 import zipfile
 import os
 from cv2 import imread, imwrite
+import cv2
 import numpy as np
 from time import sleep
 import requests
@@ -29,6 +30,7 @@ tf.config.optimizer.set_experimental_options({'layout_optimizer': False})
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 from random import sample
+import numpy as np
 
 
 ## Funcoes Importantes
@@ -58,7 +60,7 @@ class Modelo_CNN:
         
         #Criar Datasets
         print("A criar datasets")
-        self.train_ds, self.val_ds, self.test_ds = self._setup_datasets()
+        self._setup_datasets()
         print("Datasets Criados")
 
         # Caso Exista Modelo Ja Treinado
@@ -70,6 +72,7 @@ class Modelo_CNN:
                 "./assets/modelo_cnn.keras",
                 custom_objects={"preprocess_input": preprocess_input}
             )
+            self.modelo.base_model = self.modelo.layers[1]
 
 
         # Caso Seja Preciso Treinar Modelo
@@ -86,11 +89,11 @@ class Modelo_CNN:
             self._convert_to_png()
     
             print("A criar modelo")
-            self.modelo = self._setup_model()
+            self._setup_model()
             
             #Treinar Modelo
             print("A treinar modelo")
-            self.modelo = self._train_model()
+            self._train_model()
             print("Modelo treinado")
 
 
@@ -133,9 +136,10 @@ class Modelo_CNN:
         """
         Escolher x imagens random da pasta de teste para o modelo categorizar.
         """
+        test_ds = self.test_ds.cache().prefetch(tf.data.AUTOTUNE)
         # Convert test dataset to list and extract images
         test_images = []
-        for batch in self.test_ds.unbatch():
+        for batch in test_ds.unbatch():
             test_images.append(batch[0].numpy())
         
         # Randomly select images
@@ -162,11 +166,54 @@ class Modelo_CNN:
         """
         if test_dataset == None:
             test_dataset = self.test_ds
+
+        test_dataset = test_dataset.cache().prefetch(tf.data.AUTOTUNE)
             
         _, test_accuracy = self.modelo.evaluate(test_dataset, verbose=0)
         return test_accuracy
 
 
+    def display_dataset_samples(self):
+        """
+        Mostra 3 imagens aleatórias de cada um dos datasets (Treino, Validação e Teste).
+        """
+        # Dicionário para iterar sobre os datasets
+        datasets = {
+            "Treino": self.train_ds,
+            "Validação": self.val_ds,
+            "Teste": self.test_ds
+        }
+
+        plt.figure(figsize=(12, 10))
+        plot_idx = 1
+        
+        # Iterar sobre cada dataset
+        for nome_ds, ds in datasets.items():
+            # Retirar um batch para obter imagens (usa-se take(1) para ser rápido)
+            # Nota: O dataset de treino já tem shuffle, os outros não necessariamente,
+            # mas o sample abaixo garante aleatoriedade dentro do batch.
+            for images, labels in ds.take(1):
+                images_np = images.numpy()
+                labels_np = labels.numpy()
+                
+                # Garantir que não tentamos tirar mais imagens do que existem no batch
+                num_imgs = len(images_np)
+                indices = sample(range(num_imgs), min(3, num_imgs))
+                
+                for idx in indices:
+                    plt.subplot(3, 3, plot_idx)
+                    plt.imshow(images_np[idx].astype("uint8"))
+                    
+                    # Decodificar label (0 ou 1)
+                    label_num = int(labels_np[idx])
+                    nome_classe = "Cat" if label_num == 0 else "Dog" # Assumindo ordem alfabética padrão
+                    
+                    plt.title(f"{nome_ds}\nLabel: {label_num} ({nome_classe})")
+                    plt.axis("off")
+                    plot_idx += 1
+
+        plt.tight_layout()
+        plt.show()
 
 
     ## Funcoes Assistentes
@@ -247,59 +294,53 @@ class Modelo_CNN:
             print("Pasta com PNG's criada")
     
     
-    def _setup_datasets(self) -> tuple[tf.data.Dataset, tf.data.Dataset, tf.data.Dataset]:
+    def _setup_datasets(self):
         """
         Esta função da cria aos dataset de Treino, Validação e Teste.
         """
-        AUTOTUNE = tf.data.AUTOTUNE
-        
-        # Train Dataset (80%)
-        train_ds = image_dataset_from_directory(
+        # Train Dataset (70%)
+        self.train_ds = image_dataset_from_directory(
             "./assets/cats_vs_dogs_png/cats_vs_dogs/",
-            validation_split=0.2,
+            validation_split=0.3,
             subset="training",
             seed=42,
             image_size=self.tamanho_img,
             batch_size=self.tamanho_batch,
-            label_mode="binary",
+            label_mode="int",
             color_mode='rgb'
         )
     
-        # Temp Dataset (20%)
+        # Temp Dataset (30%)
         temp_ds = image_dataset_from_directory(
             "./assets/cats_vs_dogs_png/cats_vs_dogs/",
-            validation_split=0.2,
+            validation_split=0.3,
             subset="validation",
             seed=42,
             image_size=self.tamanho_img,
             batch_size=self.tamanho_batch,
-            label_mode="binary",
+            label_mode="int",
             color_mode='rgb'
         )
         
         # Separar o Temp Dataset em 2
-        val_ds = temp_ds.take(len(temp_ds) // 2)
-        test_ds = temp_ds.skip(len(temp_ds) // 2)
+        self.val_ds = temp_ds.take(len(temp_ds) // 2)
+        self.test_ds = temp_ds.skip(len(temp_ds) // 2)
         
         # Apply optimization
-        train_ds = train_ds.cache().shuffle(len(train_ds)).prefetch(AUTOTUNE)
-        val_ds = val_ds.cache().prefetch(AUTOTUNE)
-        test_ds = test_ds.cache().prefetch(AUTOTUNE)
+        
+        
     
         # Debug prints
-        for images, labels in train_ds.take(1):
+        for images, labels in self.train_ds.take(1):
             print("Shape das Imagens:", images.shape)
             print("Exemplo de Labels:", labels.numpy().T)
     
-        print("Train:", len(train_ds)*self.tamanho_batch)
-        print("Val:", len(val_ds)*self.tamanho_batch)
-        print("Test:", len(test_ds)*self.tamanho_batch)
-        
-        return train_ds, val_ds, test_ds
+        print("Train:", len(self.train_ds)*self.tamanho_batch)
+        print("Val:", len(self.val_ds)*self.tamanho_batch)
+        print("Test:", len(self.test_ds)*self.tamanho_batch)    
     
     
-    
-    def _setup_model(self) -> Sequential:
+    def _setup_model(self):
         """
         Esta função cria um modelo de uma cnn com a efficientNetB0.
         """
@@ -309,7 +350,7 @@ class Modelo_CNN:
             input_shape=input_shape,
             include_top=False,
             weights="imagenet",
-            pooling='avg'
+            pooling=None
         )
         base_model.trainable = False
     
@@ -321,13 +362,13 @@ class Modelo_CNN:
             layers.RandomContrast(0.2),
             layers.RandomBrightness(0.2),
             layers.Lambda(preprocess_input)
-        ])
+        ], name="preprocessing")
     
         model = Sequential([
             layers.Input(shape=input_shape),
             preprocess,
             base_model,
-
+            layers.GlobalAveragePooling2D(),
             layers.Dropout(0.3),
     
             layers.Dense(256),
@@ -340,17 +381,22 @@ class Modelo_CNN:
             layers.ReLU(),
             layers.Dropout(0.3),
     
-            layers.Dense(1, activation="sigmoid")
+            layers.Dense(2),
+            layers.Activation("softmax", name="predictions")
         ])
     
         model.base_model = base_model
-        return model
+        self.modelo = model
 
     
     def _train_model(self) -> Sequential:
         """
         Esta função treina o modelo com vários hiper-parâmetros.
         """
+
+        train_ds = self.train_ds.cache().shuffle(len(self.train_ds)).prefetch(tf.data.AUTOTUNE)
+        val_ds = self.val_ds.cache().prefetch(tf.data.AUTOTUNE)
+        
         # Enhanced callbacks
         early_stop = EarlyStopping(
             monitor="val_loss",
@@ -370,14 +416,14 @@ class Modelo_CNN:
         # Initial training with frozen base
         self.modelo.compile(
             optimizer=Adam(1e-3),
-            loss="binary_crossentropy",
+            loss="sparse_categorical_crossentropy",
             metrics=["accuracy"]
         )
         
         print("Stage 1: Training top layers...")
         history1 = self.modelo.fit(
-            self.train_ds,
-            validation_data=self.val_ds,
+            train_ds,
+            validation_data=val_ds,
             epochs=30,
             callbacks=[early_stop, reduce_lr],
             verbose=1
@@ -396,14 +442,14 @@ class Modelo_CNN:
         # Recompile with lower learning rate
         self.modelo.compile(
             optimizer=Adam(1e-4),  # Lower LR for fine-tuning
-            loss="binary_crossentropy",
+            loss="sparse_categorical_crossentropy",
             metrics=["accuracy"]
         )
         
         print("Fine-tuning last 50 layers...")
         history2 = self.modelo.fit(
-            self.train_ds,
-            validation_data=self.val_ds,
+            train_ds,
+            validation_data=val_ds,
             initial_epoch=len(history1.epoch),
             epochs=len(history1.epoch) + 30,
             callbacks=[early_stop, reduce_lr],
@@ -422,13 +468,13 @@ class Modelo_CNN:
         # Even lower learning rate for final tuning
         self.modelo.compile(
             optimizer=Adam(1e-5),
-            loss="binary_crossentropy",
+            loss="sparse_categorical_crossentropy",
             metrics=["accuracy"]
         )
         
         history3 = self.modelo.fit(
-            self.train_ds,
-            validation_data=self.val_ds,
+            train_ds,
+            validation_data=val_ds,
             initial_epoch=len(history1.epoch) + len(history2.epoch),
             epochs=len(history1.epoch) + len(history2.epoch) + 20,
             callbacks=[early_stop, reduce_lr],
@@ -438,8 +484,6 @@ class Modelo_CNN:
         # Save final model
         self.modelo.save("./assets/modelo_cnn.keras")
         self._plot_train_graph(history1, history2, history3)
-        
-        return self.modelo
     
     
     def _plot_train_graph(self, *histories):
@@ -537,7 +581,6 @@ class Modelo_CNN:
         
         plt.tight_layout()
         plt.savefig("./assets/grafico_modelo_cnn.png", dpi=300, bbox_inches='tight')
-        plt.show()
         
         # Imprimir máximos de cada estágio
         for i, history in enumerate(histories):
@@ -551,12 +594,14 @@ class Modelo_CNN:
         img_array = preprocess_input(img_array)
         img_array = np.expand_dims(img_array, axis=0)
     
-        pred = self.modelo.predict(img_array, verbose=0)[0][0]
-    
+        # O output agora é algo como [[0.1, 0.9]]
+        preds = self.modelo.predict(img_array, verbose=0)[0] 
+        
+        # Índice 0 = Gato, Índice 1 = Cão (ordem alfabética padrão do keras flow_from_directory)
         class_names = ['Cat', 'Dog']
+        
+        predicted_index = np.argmax(preds) # Pega o índice do maior valor
+        confidence = preds[predicted_index]
+        
+        return class_names[predicted_index], float(confidence)
     
-        if pred < 0.5:
-            return class_names[0], float(1 - pred)
-        else:
-            return class_names[1], float(pred)
-
